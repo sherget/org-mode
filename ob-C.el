@@ -122,7 +122,7 @@ or `org-babel-execute:C++'."
 (defun org-babel-C-expand (body params)
   "Expand a block of C or C++ code with org-babel according to
 it's header arguments."
-  (let ((vars (mapcar #'cdr (org-babel--get-vars params :var)))
+  (let ((vars (mapcar #'cdr (org-babel--get-vars params)))
         (main-p (not (string= (cdr (assoc :main params)) "no")))
         (includes (or (cdr (assoc :includes params))
                       (org-babel-read (org-entry-get nil "includes" t))))
