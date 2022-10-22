@@ -65,7 +65,7 @@ This function is called by `org-babel-execute-src-block'."
      (format "$%s = %s;"
              (car pair)
              (org-babel-php-var-to-php (cdr pair))))
-   (mapcar #'cdr (org-babel--get-vars params :var))))
+   (mapcar #'cdr (org-babel--get-vars params))))
 
 (defun org-babel-php-var-to-php (var)
   "Convert VAR into a php variable.
