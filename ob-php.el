@@ -1,10 +1,11 @@
 ;;; ob-php.el --- org-babel functions for php evaluation
 
-;; Copyright (C) steckerhalter
+;; Copyright (C) Tristan Huang
 
-;; Author: steckerhalter
-;; Keywords: literate programming, reproducible research, php
-;; Homepage: https://github.com/steckerhalter/ob-php
+;; Author: Tristan Huang
+;; Keywords: literate programming, reproducible research
+;; Homepage: https://orgmode.org
+;; Version: 0.01
 
 ;;; License:
 
@@ -27,36 +28,80 @@
 
 ;; Org-Babel support for evaluating php source code.
 
-;;; Requirements:
-
-;; php command line executable
-
 ;;; Code:
 (require 'ob)
+(require 'ob-ref)
+(require 'ob-comint)
 (require 'ob-eval)
 
-(add-to-list 'org-babel-tangle-lang-exts '("php"))
+(add-to-list 'org-babel-tangle-lang-exts '("php" . "php"))
 
 (defvar org-babel-default-header-args:php '())
 
-(defvar org-babel-php-command "php"
-  "Name of command to use for executing ruby code.")
+(defcustom org-babel-php-command "php"
+  "Name of the command for executing php code."
+  :version "24.4"
+  :package-version '(Org . "8.0")
+  :group 'org-babel
+  :type 'string)
 
-(defun org-babel-execute:php (body params)
-  "Execute a block of PHP code with Babel.
-This function is called by `org-babel-execute-src-block'."
-  (let* ((session (org-babel-php-initiate-session (cdr (assoc :session params))))
-         (result-params (cdr (assoc :result-params params)))
-         (result-type (cdr (assoc :result-type params)))
-         (full-body (org-babel-expand-body:generic
-                     body params (org-babel-variable-assignments:php params)))
-         (result (org-babel-php-evaluate session full-body result-type result-params)))
-    (org-babel-reassemble-table
-     result
-     (org-babel-pick-name (cdr (assoc :colname-names params))
-                          (cdr (assoc :colnames params)))
-     (org-babel-pick-name (cdr (assoc :rowname-names params))
-                          (cdr (assoc :rownames params))))))
+(defcustom org-babel-php-hline-to "null"
+  "Replace hlines in incoming tables with this when translating to php."
+  :group 'org-babel
+  :version "24.4"
+  :package-version '(Org . "8.0")
+  :type 'string
+  )
+
+(defcustom org-babel-php-null-to 'hline
+  "Replace `null' in php with this before returning."
+  :group 'org-babel
+  :version "24.4"
+  :package-version '(Org . "8.0")
+  :type 'symbol)
+
+(defconst org-babel-php-wrapper-method
+  "<?php
+function main() {%s}
+$handle = fopen('%s', 'w'); fwrite($handle, var_export(main(), true)); fclose($handle);?>")
+
+(defconst org-babel-php-pp-wrapper-method
+  "<?php
+function main() {%s}
+$handle = fopen('%s', 'w');fwrite($handle, print_r(main(), true));fclose($handle);?>")
+
+;; Convert
+(defun org-babel-php-array-escape (results)
+  "Safely convert php array into elisp lists."
+  (org-babel-read
+   (if (and (stringp results)
+	    (string-prefix-p "array (" results))
+       (concat "'"
+	       (org-babel--script-escape-inner
+		(replace-regexp-in-string
+		 "array ($" "("
+		 (replace-regexp-in-string
+		  "[[:print:]\']+[[:space:]]=>[[:space:]]" "" results))))
+     results)))
+
+(defun org-babel-php-table-or-string (results)
+  "If the results look like a table, then convert them into an
+Emacs-lisp table, otherwise return the results as a string."
+  (let ((res (org-babel-php-array-escape results)))
+    (if (listp res)
+	(mapcar (lambda (el) (if (eq el 'null)
+				 org-babel-php-null-to el))
+		res)
+      res)))
+
+(defun org-babel-php-var-to-php (var)
+  "Convert an elisp var into a string of php source code
+specifying a var of the same value."
+  (if (listp var)
+      (concat "[" (mapconcat #'org-babel-php-var-to-php var ", ") "]") ;; array
+    (if (eq var 'hline)
+	org-babel-php-hline-to
+      (format "%S" var))))
 
 (defun org-babel-variable-assignments:php (params)
   "Return list of php statements assigning the block's variables."
@@ -67,131 +112,67 @@ This function is called by `org-babel-execute-src-block'."
 	     (org-babel-php-var-to-php (cdr pair))))
    (org-babel--get-vars params)))
 
-(defun org-babel-php-var-to-php (var)
-  "Convert VAR into a php variable.
-Convert an elisp value into a string of PHP source code
-specifying a variable of the same value."
-  (if (listp var)
-      (concat "[" (mapconcat #'org-babel-php-var-to-php var ", ") "]")
-    (format "%S" var)))
+;; Evaluate
+(defun org-babel-execute:php (body params)
+  "Execute a block of Template code with org-babel.
+This function is called by `org-babel-execute-src-block'"
+  (message "executing php source code block")
+  (let* ((session (org-babel-php-initiate-session
+		   (cdr (assq :session params))))
+         (result-params (cdr (assq :result-params params)))
+	 (result-type (cdr (assq :result-type params)))
+         (full-body (org-babel-expand-body:generic
+                     body params (org-babel-variable-assignments:php params)))
+	 (result (org-babel-php-evaluate
+		  session full-body result-type result-params)))
+    (org-babel-reassemble-table
+     (org-babel-result-cond result-params
+       result
+       (org-babel-php-table-or-string result))
+     (org-babel-pick-name (cdr (assq :colname-names params))
+    			  (cdr (assq :colnames params)))
+     (org-babel-pick-name (cdr (assq :rowname-names params))
+    			  (cdr (assq :rownames params))))))
 
-(defun org-babel-php-table-or-string (results)
-  "Convert RESULTS into an appropriate elisp value.
-If RESULTS look like a table, then convert them into an
-Emacs-lisp table, otherwise return the results as a string."
-  (org-babel-script-escape results))
-
-(defun org-babel-php-initiate-session (&optional session params)
-  "Initiate a PHP session.
-If there is not a current inferior-process-buffer in SESSION
-then create one.  Return the initialized session."
-  (unless (string= session "none")
-    (require 'php-boris)
-    (let ((session-buffer
-           (save-window-excursion
-             (php-boris)
-             (add-hook 'comint-preoutput-filter-functions
-                       'org-babel-php-comint-preoutput-filter nil t)
-             (current-buffer))))
-      (if (org-babel-comint-buffer-livep session-buffer)
-          (progn (sit-for .2 t) session-buffer)
-        (error "Could not create session with php-boris")))))
-
-(defvar org-babel-php-comint-preoutput-var nil)
-
-(defun org-babel-php-comint-preoutput-filter (string)
-  "REPL output STRING is run through this function.
-We filter out all the return values and the boris> prompts so
-that only output remains.  An empty string is passed to the boris
-repl so that we don't clutter it."
-  (setq org-babel-php-comint-preoutput-var
-        (org-babel-trim
-         (mapconcat ; put the string together again
-          (lambda (l)
-            (replace-regexp-in-string "\\(^\\|\n\\) → .*?\\($\\|\n\\)" "" l))
-          (split-string ; split the rest around the prompt
-           (replace-regexp-in-string
-            "\r" ""
-            (ansi-color-filter-apply ; filter ansi colors
-             (replace-regexp-in-string
-              (concat "^\\(" org-babel-php-body "\\)\\'") ; remove echoed input
-              ""
-              string nil nil 1)))
-           "\\[[0-9]+\\] boris> ")
-          "")))
-  string)
-
-(defvar org-babel-php-wrapper-method
-  "
-<?php
-$code = <<<'EOF'
-%s
-EOF;
-$results = eval($code);
-file_put_contents('%s', $results);
-")
-
-(defvar org-babel-php-pp-wrapper-method
-  "
-<?php
-$code = <<<'EOF'
-%s
-EOF;
-$results = eval($code);
-file_put_contents('%s', print_r($results, true));
-")
-
-(defun org-babel-php-evaluate (session body &optional result-type result-params)
-  "Evaluate BODY as PHP code."
-    (if session
-      (org-babel-php-evaluate-session
-       session body result-type result-params)
-    (org-babel-php-evaluate-external-process
-     body result-type result-params)))
+(defun org-babel-php-evaluate
+    (session body &optional result-type result-params)
+  "Evaluate BODY as php code."
+  (if (not session)
+      (org-babel-php-evaluate-external-process
+       body result-type result-params)
+    (org-babel-php-evaluate-session 
+     session body result-type result-params)))
 
 (defun org-babel-php-evaluate-external-process
-  (body &optional result-type result-params)
-  "Evaluate BODY in external PHP process.
-If RESULT-TYPE equals 'output then return standard output as a
-string.  If RESULT-TYPE equals 'value then return the value of the
+    (body &optional result-type result-params)
+  "Evaluate BODY in external php process.
+If RESULT-TYPE equals `output' then return standard output as a 
+string. If RESULT-TYPE equals `value' then return the value of the 
 last statement in BODY, as elisp."
-  (case result-type
-    (output (org-babel-eval org-babel-php-command (concat "<?php\n" body)))
-    (value (let ((tmp-file (org-babel-temp-file "php-")))
-             (org-babel-eval
-              org-babel-php-command
-              (format (if (member "pp" result-params)
-                          org-babel-php-pp-wrapper-method
-                        org-babel-php-wrapper-method)
-                      body (org-babel-process-file-name tmp-file 'noquote)))
-             ((lambda (raw)
-                (if (or (member "code" result-params)
-                        (member "pp" result-params))
-                    raw
-                  (org-babel-php-table-or-string raw)))
-              (org-babel-eval-read-file tmp-file))))))
+  (pcase result-type
+    (`output (org-babel-eval org-babel-php-command (format "<?php %s ?>" body)))
+    (`value (let ((tmp-file (org-babel-temp-file "php-")))
+	      (org-babel-eval
+	       org-babel-php-command
+	       (format
+		(if (member "pp" result-params)
+		    org-babel-php-pp-wrapper-method
+		  org-babel-php-wrapper-method)
+		body (org-babel-process-file-name tmp-file 'noquote)))
+	      (org-babel-eval-read-file tmp-file)))))
+
+;; Session
+(defun org-babel-prep-session:php (session params)
+  "Prepare SESSION according to the header arguments specified in PARAMS."
+  (error "Sessions are not supported for php"))
+
+(defun org-babel-php-initiate-session (&optional session)
+  "Sessions are not supported for php right now."
+  nil)
 
 (defun org-babel-php-evaluate-session
-  (session body &optional result-type result-params)
-  "Pass BODY to the PHP process in SESSION.
-If RESULT-TYPE equals 'output then return standard output as a
-string.  If RESULT-TYPE equals 'value then return the value of the
-last statement in BODY, as elisp."
-  (case result-type
-    (output
-     (setq org-babel-php-body body)
-     (let ((buffer (generate-new-buffer " *boris-repl-temp*")) result)
-       (comint-redirect-send-command-to-process body buffer session t t)
-       (while (not org-babel-php-comint-preoutput-var)
-         (sit-for .1 t))
-       (kill-buffer buffer)
-       (setq result org-babel-php-comint-preoutput-var)
-       (setq org-babel-php-comint-preoutput-var nil)
-       result
-       ))
-    (value
-     (error "Value support for session not implemented yet"))))
+    (session body &optional result-type result-params)
+  "TODO: Pass BODY to the php process in SESSION.")
 
 (provide 'ob-php)
-
 ;;; ob-php.el ends here
