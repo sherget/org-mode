@@ -60,12 +60,12 @@ This function is called by `org-babel-execute-src-block'."
 
 (defun org-babel-variable-assignments:php (params)
   "Return list of PHP statements assigning the block's variables."
-  (let ((vars (mapcar #'cdr (org-babel--get-vars params))))
   (mapcar
    (lambda (pair)
      (format "$%s = %s;"
              (car pair)
-             (org-babel-php-var-to-php (cdr pair)))))
+             (org-babel-php-var-to-php (cdr pair))))
+   (mapcar #'cdr (org-babel--get-vars params))))
 
 (defun org-babel-php-var-to-php (var)
   "Convert VAR into a php variable.
